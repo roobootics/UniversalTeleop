@@ -11,6 +11,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.Condition;
 import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.DoubleFunction;
+import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.ShortFunction;
 import org.firstinspires.ftc.teamcode.teleop.TeleOpComponents.BotMotor;
 
 
@@ -395,6 +396,24 @@ public abstract class TeleOpActions{
             TeleOpComponents.telemetry.addData("servo pos",TeleOpComponents.tetsyWetsy.getPosition());
             TeleOpComponents.telemetry.update();
             return true;
+        }
+    }
+    public static class ShortAction implements TeleOpAction{
+        ShortFunction action;
+        public ShortAction(ShortFunction action){this.action=action;}
+
+        @Override
+        public boolean repeatFromStart(@NonNull TelemetryPacket packet) {
+            return run(packet);
+        }
+
+        @Override
+        public void stop() {}
+
+        @Override
+        public boolean run(@NonNull TelemetryPacket telemetryPacket) {
+            action.call();
+            return false;
         }
     }
 
