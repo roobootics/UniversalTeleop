@@ -21,7 +21,7 @@ public abstract class TetsyWetsyUwURevamped extends LinearOpMode {
         TeleOpActions.runLoop(
                 this::opModeIsActive,
                 this::isStopRequested,
-                tetsyWetsy.triggeredDynamicAction(()->(gamepad1.dpad_up),()->(gamepad1.dpad_up),1),
+                tetsyWetsy.triggeredDynamicAction(()->(gamepad1.dpad_up),()->(gamepad1.dpad_down),1),
                 new UpdateTelemetryAction()
         );
     }

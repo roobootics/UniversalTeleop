@@ -1,10 +1,14 @@
 package org.firstinspires.ftc.teamcode.teleop;
 
 
+import static org.firstinspires.ftc.teamcode.teleop.TeleOpComponents.drive;
+
 import androidx.annotation.NonNull;
 
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.acmerobotics.roadrunner.Action;
+import com.acmerobotics.roadrunner.TrajectoryActionBuilder;
+import com.acmerobotics.roadrunner.Vector2d;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
@@ -12,6 +16,10 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.Condition;
 import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.DoubleFunction;
 import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.ShortFunction;
+import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.StrafeToLinearHeading;
+import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.WaitSeconds;
+import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.TurnTo;
+import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.RoadrunnerFunction;
 import org.firstinspires.ftc.teamcode.teleop.TeleOpComponents.BotMotor;
 
 
@@ -23,6 +31,7 @@ import java.util.Objects;
 
 public abstract class TeleOpActions{
     public static TelemetryPacket packet = new TelemetryPacket();
+    public static boolean isRRActive=false;
     public interface TeleOpAction extends Action {
         boolean repeatFromStart(@NonNull TelemetryPacket packet);
         void stop();
@@ -37,22 +46,34 @@ public abstract class TeleOpActions{
         }
         @Override
         public boolean run(@NonNull TelemetryPacket telemetryPacket) {
+            boolean diffAction = false;
             for (Condition condition : actions.keySet()){
                 if (condition.call()){
                     if (currentAction != null && actions.get(condition)!=currentAction){
                         currentAction.stop();
+                        diffAction=true;
                     }
                     currentAction=actions.get(condition);
                     break;
                 }
             }
             if (currentAction != null) {
-                if(!currentAction.run(packet)){
-                    currentAction=null;
-                    return false;
+                if (diffAction){
+                    if(!currentAction.repeatFromStart(packet)){
+                        currentAction=null;
+                        return false;
+                    }
+                    else{
+                        return true;
+                    }
                 }
-                else{
-                    return true;
+                else {
+                    if (!currentAction.run(packet)) {
+                        currentAction = null;
+                        return false;
+                    } else {
+                        return true;
+                    }
                 }
             }
             return false;
@@ -265,6 +286,32 @@ public abstract class TeleOpActions{
             }
         }
     }
+    public static class UninterruptiblePressTrigger extends UninterruptibleConditionalAction{
+        public boolean isPressed=false;
+
+        public Condition modifyCondition(Condition condition){
+            return () -> {
+                if (condition.call()){
+                    if (!isPressed) {
+                        isPressed = true;
+                        return true;
+                    }
+                    else return false;
+                }
+                else{
+                    isPressed=false;
+                    return false;
+                }
+            };
+        }
+        public UninterruptiblePressTrigger(Condition[] conditions, TeleOpAction[] actions) {
+            super(conditions, actions);
+            this.actions.clear();
+            for (int i=0;i<= conditions.length;i++){
+                this.actions.put(modifyCondition(conditions[i]),actions[i]);
+            }
+        }
+    }
 
     public static class FieldCentricMecanumAction implements TeleOpAction{
         private final DoubleFunction xFun;
@@ -414,6 +461,85 @@ public abstract class TeleOpActions{
         public boolean run(@NonNull TelemetryPacket telemetryPacket) {
             action.call();
             return false;
+        }
+    }
+    public static class TeleOpSleepAction implements TeleOpAction{
+        boolean isStart=true;
+        double time;
+        ElapsedTime timer = new ElapsedTime();
+        public TeleOpSleepAction(double time){
+            this.time=time;
+        }
+        @Override
+        public boolean repeatFromStart(@NonNull TelemetryPacket packet) {
+            isStart=true;
+            return run(packet);
+        }
+        @Override
+        public void stop() {}
+
+        @Override
+        public boolean run(@NonNull TelemetryPacket telemetryPacket) {
+            if (isStart){
+                isStart=false;
+                timer.reset();
+            }
+            return timer.time()<time;
+        }
+    }
+    public static class TeleOpTrajectoryAction implements TeleOpAction{
+        TrajectoryActionBuilder trajBuilder;
+        Action traj;
+        LinkedHashMap<RoadrunnerFunction,Object[]> funcs = new LinkedHashMap<>();
+        boolean isStart=true;
+        @Override
+        public boolean repeatFromStart(@NonNull TelemetryPacket packet) {
+            isStart=true;
+            return run(packet);
+        }
+        @Override
+        public void stop() {
+            drive.leftFront.setPower(0);
+            drive.leftBack.setPower(0);
+            drive.rightFront.setPower(0);
+            drive.rightBack.setPower(0);
+            isRRActive=false;
+        }
+        @Override
+        public boolean run(@NonNull TelemetryPacket telemetryPacket){
+            if (isStart){
+                isStart=false;
+                drive.updatePoseEstimate();
+                trajBuilder = drive.actionBuilder(drive.pose);
+                for (RoadrunnerFunction action : funcs.keySet()){
+                    if (action instanceof StrafeToLinearHeading){
+                        StrafeToLinearHeading castedAction = (StrafeToLinearHeading) action;
+                        trajBuilder = castedAction.call((Vector2d) Objects.requireNonNull(funcs.get(action))[0],(double) Objects.requireNonNull(funcs.get(action))[1]);
+                    }
+                    else if (action instanceof WaitSeconds){
+                        WaitSeconds castedAction = (WaitSeconds) action;
+                        trajBuilder = castedAction.call((double) Objects.requireNonNull(funcs.get(action))[0]);
+                    }
+                }
+                traj = trajBuilder.build();
+            }
+            isRRActive=true;
+            return traj.run(packet);
+        }
+        public TeleOpTrajectoryAction strafeToLinearHeading(Vector2d vector, double heading){
+            StrafeToLinearHeading func = trajBuilder::strafeToLinearHeading;
+            funcs.put(func,new Object[]{vector,heading});
+            return this;
+        }
+        public TeleOpTrajectoryAction waitSeconds(double time){
+            WaitSeconds func = trajBuilder::waitSeconds;
+            funcs.put(func,new Object[]{time});
+            return this;
+        }
+        public TeleOpTrajectoryAction turnTo(double heading){
+            TurnTo func = trajBuilder::turnTo;
+            funcs.put(func,new Object[]{heading});
+            return this;
         }
     }
 

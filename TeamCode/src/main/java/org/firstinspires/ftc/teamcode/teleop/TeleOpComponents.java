@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.teleop;
 import androidx.annotation.NonNull;
 
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
+import com.acmerobotics.roadrunner.Pose2d;
 import com.acmerobotics.roadrunner.SleepAction;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorController;
@@ -15,6 +16,7 @@ import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigu
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
+import org.firstinspires.ftc.teamcode.PinpointDrive;
 import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.DoubleFunction;
 import org.firstinspires.ftc.teamcode.teleop.LambdaInterfaces.Condition;
 import org.firstinspires.ftc.teamcode.teleop.TeleOpActions.TeleOpAction;
@@ -30,8 +32,9 @@ import java.util.List;
 
 
 public abstract class TeleOpComponents {
-    static HardwareMap hardwareMap;
-    static Telemetry telemetry;
+    public static HardwareMap hardwareMap;
+    public static Telemetry telemetry;
+    public static PinpointDrive drive;
     public static ArrayList<BotMotor> motors = new ArrayList<>();
     public static ArrayList<BotServo> servos = new ArrayList<>();
 
@@ -450,50 +453,52 @@ public abstract class TeleOpComponents {
         public class SetPositionAction implements TeleOpAction {
             boolean isStart;
             DoubleFunction posFun;
-            ArrayList<SleepAction> sleepActions = new ArrayList<>();
+            double startPos = getPosition();
+            ElapsedTime timer = new ElapsedTime();
+            double time=0;
             public SetPositionAction(double pos){
                 this.posFun = () -> (pos);
-                sleepActions.add(new SleepAction(Math.abs(pos-getPosition())*SERVO_SPEED));
+                time=Math.abs(posFun.call()-getPosition())/SERVO_SPEED;
             }
             public SetPositionAction(DoubleFunction posFun) {
                 this.posFun = posFun;
-                sleepActions.add(new SleepAction(Math.abs(posFun.call()-getPosition())*SERVO_SPEED));
+
             }
             @Override
             public boolean run(@NonNull TelemetryPacket telemetryPacket) {
                 if (isStart) {
-                    setPosition(posFun.call());
                     isStart=false;
+                    time=Math.abs(posFun.call()-startPos)/SERVO_SPEED;
+                    setPosition(posFun.call());
+                    timer.reset();
                 }
-                boolean result = sleepActions.get(0).run(telemetryPacket);
-                if (!result){
-                    sleepActions.remove(0);
-                }
-                return result;
+                return (time-timer.time())<=0;
             }
 
             @Override
             public boolean repeatFromStart(@NonNull TelemetryPacket packet) {
                 isStart=true;
-                sleepActions.add(new SleepAction(Math.abs(posFun.call()-getPosition())*SERVO_SPEED+0.07));
-                return false;
+                startPos = Math.signum(getPosition()-startPos)*SERVO_SPEED*Math.min(time,timer.time())+startPos;
+                return run(packet);
             }
 
             @Override
             public void stop() {
-                sleepActions.clear();
+                time=0;
             }
         }
         public SetPositionAction setPositionAction(double pos){
             return new SetPositionAction(pos);
         }
         public SetPositionAction setPositionAction(DoubleFunction posFun){
-            return new SetPositionAction(posFun.call());
+            return new SetPositionAction(posFun);
         }
         public class UpwardFSMAction implements TeleOpAction{
+            double startPos = getPosition();
+            ElapsedTime timer = new ElapsedTime();
+            double time=0;
             private final double[] positions;
             boolean isStart=true;
-            ArrayList<SleepAction> sleepActions = new ArrayList<>();
 
             public UpwardFSMAction(double...positions) {
                 this.positions = positions;
@@ -502,39 +507,39 @@ public abstract class TeleOpComponents {
             @Override
             public boolean repeatFromStart(@NonNull TelemetryPacket packet) {
                 isStart=true;
+                startPos = Math.signum(getPosition()-startPos)*SERVO_SPEED*Math.min(time,timer.time())+startPos;
                 return run(packet);
             }
 
             @Override
             public void stop() {
-                sleepActions.clear();
+                time=0;
             }
 
             @Override
             public boolean run(@NonNull TelemetryPacket telemetryPacket) {
                 if (isStart) {
                     double pos=getPosition();
+                    isStart=false;
                     for (double position : positions){
                         if (position>pos){
                             pos=position;
                             break;
                         }
                     }
+                    time=Math.abs(pos-startPos)/SERVO_SPEED;
                     setPosition(pos);
-                    isStart=false;
+                    timer.reset();
                 }
-                boolean result = sleepActions.get(0).run(telemetryPacket);
-                if (!result){
-                    sleepActions.remove(0);
-                }
-                return result;
+                return (time-timer.time())<=0;
             }
         }
         public class DownwardFSMAction implements TeleOpAction{
             private final List<Double> positions;
-            ArrayList<SleepAction> sleepActions = new ArrayList<>();
             boolean isStart=true;
-
+            double startPos = getPosition();
+            ElapsedTime timer = new ElapsedTime();
+            double time=0;
             public DownwardFSMAction(double...positions) {
                 Arrays.sort(positions);
                 Double[] newPositions = new Double[positions.length];
@@ -547,33 +552,31 @@ public abstract class TeleOpComponents {
             @Override
             public boolean repeatFromStart(@NonNull TelemetryPacket packet) {
                 isStart=true;
+                startPos = Math.signum(getPosition()-startPos)*SERVO_SPEED*Math.min(time,timer.time())+startPos;
                 return run(packet);
             }
 
             @Override
             public void stop() {
-                sleepActions.clear();
+                time=0;
             }
 
             @Override
             public boolean run(@NonNull TelemetryPacket telemetryPacket) {
                 if (isStart) {
                     double pos=getPosition();
+                    isStart=false;
                     for (double position : positions){
                         if (position<pos){
                             pos=position;
                             break;
                         }
                     }
+                    time=Math.abs(pos-startPos)/SERVO_SPEED;
                     setPosition(pos);
-                    sleepActions.add(new SleepAction(Math.abs(pos-getPosition())*SERVO_SPEED));
-                    isStart=false;
+                    timer.reset();
                 }
-                boolean result = sleepActions.get(0).run(telemetryPacket);
-                if (!result){
-                    sleepActions.remove(0);
-                }
-                return result;
+                return (time-timer.time())<=0;
             }
         }
         public PressTrigger triggeredFSMAction(Condition upCondition, Condition downCondition,double...positions){
@@ -582,7 +585,7 @@ public abstract class TeleOpComponents {
         public ConditionalAction triggeredDynamicAction(Condition upCondition, Condition downCondition, double change){
             return new ConditionalAction(new Condition[]{upCondition,downCondition}, new TeleOpAction[]{new SetPositionAction(getPosition()+change),new SetPositionAction(getPosition()-change)});
         }
-        public PressTrigger triggeredMoveToTargetAction(Condition condition, double target){
+        public PressTrigger triggeredMoveToPositionAction(Condition condition, double target){
             return new PressTrigger(new Condition[]{condition},new TeleOpAction[]{new SetPositionAction(target)});
         }
         public PressTrigger triggeredToggleAction(Condition condition, double target1, double target2){
@@ -598,6 +601,7 @@ public abstract class TeleOpComponents {
     public static void initializeMechanisms(HardwareMap hardwareMap, Telemetry telemetry){
         TeleOpComponents.hardwareMap=hardwareMap;
         TeleOpComponents.telemetry=telemetry;
+        TeleOpComponents.drive = new PinpointDrive(hardwareMap,new Pose2d(0,0,Math.toRadians(90)));
         //initialize mechanism variables here
         ryanNemesis =new BotMotor(
                 hardwareMap.get(DcMotorEx.class, "motor-1").getDeviceName(),
